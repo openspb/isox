@@ -1,7 +1,7 @@
 defmodule Isox.MixProject do
   use Mix.Project
 
-  @source_url "https://github.com/RicardoSantos-99/isox"
+  @source_url "https://github.com/openspb/isox"
   @version "0.2.0"
 
   def project do

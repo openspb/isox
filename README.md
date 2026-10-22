@@ -1,6 +1,6 @@
 # Isox
 
-[![CI](https://github.com/RicardoSantos-99/isox/actions/workflows/ci.yml/badge.svg)](https://github.com/RicardoSantos-99/isox/actions/workflows/ci.yml)
+[![CI](https://github.com/openspb/isox/actions/workflows/ci.yml/badge.svg)](https://github.com/openspb/isox/actions/workflows/ci.yml)
 [![Hex.pm](https://img.shields.io/hexpm/v/isox.svg)](https://hex.pm/packages/isox)
 [![Documentation](https://img.shields.io/badge/hexdocs-online-purple.svg)](https://hexdocs.pm/isox)
 [![License](https://img.shields.io/hexpm/l/isox.svg)](LICENSE)

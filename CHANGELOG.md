@@ -3,7 +3,7 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 este projeto segue [versionamento semântico](https://semver.org/lang/pt-BR/).
 
-## [Não lançado]
+## [0.3.0] - 2026-10-23
 
 ### Adicionado
 
@@ -14,6 +14,12 @@ este projeto segue [versionamento semântico](https://semver.org/lang/pt-BR/).
   pelo mesmo caminho, com a mesma assinatura. O README mostra como ler um
   `.p12` com o pacote [pkcs12](https://hex.pm/packages/pkcs12), que não
   vira dependência do isox.
+
+### Modificado
+
+- Os links do pacote no Hex e da documentação apontam para
+  [openspb/isox](https://github.com/openspb/isox), o novo endereço do
+  repositório.
 
 ### Corrigido
 
@@ -306,6 +312,6 @@ Primeira versão pública.
   passou a suportar lote, só parou de crashar por causa dele. Achado no
   deep dive de validação do catálogo (issue #47, pacs.002).
 
-[Não lançado]: https://github.com/openspb/isox/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/openspb/isox/releases/tag/v0.3.0
 [0.2.0]: https://github.com/openspb/isox/releases/tag/v0.2.0
 [0.1.0]: https://github.com/openspb/isox/releases/tag/v0.1.0

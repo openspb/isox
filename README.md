@@ -19,7 +19,7 @@ regra de negócio de quem a usa.
 ```elixir
 def deps do
   [
-    {:isox, "~> 0.1.0"}
+    {:isox, "~> 0.3.0"}
   ]
 end
 ```

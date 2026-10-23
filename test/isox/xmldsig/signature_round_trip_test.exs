@@ -162,6 +162,56 @@ defmodule Isox.Xmldsig.SignatureRoundTripTest do
     assert {:error, {:digest_mismatch, 1}} = Verifier.verify(envelope, certificate_der)
   end
 
+  describe "formato da chave privada" do
+    test "PKCS#1 assina exatamente como antes de PKCS#8 ser aceito", %{
+      private_key_der: private_key_der
+    } do
+      signed_info =
+        ~s(<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"></ds:SignedInfo>)
+
+      before =
+        signed_info
+        |> :public_key.sign(:sha256, :public_key.der_decode(:RSAPrivateKey, private_key_der))
+        |> Base.encode64()
+
+      assert Signer.rsa_sign(signed_info, private_key_der) == before
+      assert Signer.rsa_sign(signed_info, pkcs8(private_key_der)) == before
+    end
+
+    test "PKCS#8 assina e verifica", %{
+      private_key_der: private_key_der,
+      certificate_der: certificate_der
+    } do
+      signature_xml =
+        Signer.sign(app_hdr_xml(), document_xml(), pkcs8(private_key_der), certificate_der)
+
+      envelope = assemble_envelope(app_hdr_xml(), document_xml(), signature_xml)
+
+      assert Verifier.verify(envelope, certificate_der) == :ok
+    end
+
+    test "chave EC levanta ArgumentError, em SEC1 ou em PKCS#8", %{
+      certificate_der: certificate_der
+    } do
+      ec_key = :public_key.generate_key({:namedCurve, :secp256r1})
+
+      for ec_der <- [
+            :public_key.der_encode(:ECPrivateKey, ec_key),
+            :public_key.der_encode(:PrivateKeyInfo, ec_key)
+          ] do
+        assert_raise ArgumentError, ~r/chave privada é EC.*RSA-SHA256/, fn ->
+          Signer.sign(app_hdr_xml(), document_xml(), ec_der, certificate_der)
+        end
+      end
+    end
+
+    test "bytes que não são chave levantam ArgumentError", %{certificate_der: certificate_der} do
+      assert_raise ArgumentError, ~r/não reconhecida.*PKCS#1.*PKCS#8/, fn ->
+        Signer.sign(app_hdr_xml(), document_xml(), "não é DER", certificate_der)
+      end
+    end
+  end
+
   describe "emissor do certificado" do
     test "UTF8String com acento assina e verifica", ca do
       certificate_der =
@@ -210,6 +260,13 @@ defmodule Isox.Xmldsig.SignatureRoundTripTest do
         assert Verifier.verify(envelope, certificate_der) == :ok
       end
     end
+  end
+
+  defp pkcs8(rsa_private_key_der) do
+    :public_key.der_encode(
+      :PrivateKeyInfo,
+      :public_key.der_decode(:RSAPrivateKey, rsa_private_key_der)
+    )
   end
 
   # O certificado do TestCA com emissor e titular trocados, assinado de

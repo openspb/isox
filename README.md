@@ -206,6 +206,20 @@ em texto puro. O padrão comum é guardar caminhos de arquivo `.pem` em
 config e decodificar para DER na sua aplicação. Esta lib de propósito não
 lê arquivo, env nem config: ela só recebe bytes.
 
+A chave privada entra em DER, em PKCS#1 (`BEGIN RSA PRIVATE KEY`) ou em
+PKCS#8 sem cifra (`BEGIN PRIVATE KEY`, o padrão do OpenSSL 3). O
+certificado também vai em DER.
+
+Se a chave e o certificado do PSP vêm juntos num `.pfx` ou `.p12`, o pacote
+[pkcs12](https://hex.pm/packages/pkcs12) lê os dois do arquivo. Ele entra
+como dependência do seu projeto, não do isox:
+
+```elixir
+# mix.exs: {:pkcs12, "~> 0.1"}
+p12 = PKCS12.decode!(File.read!("psp.pfx"), senha)
+Isox.sign(app_hdr_xml, document_xml, p12.private_key, p12.certificate)
+```
+
 Para medir o throughput local de assinatura e verificação:
 
 ```bash

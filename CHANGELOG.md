@@ -5,8 +5,21 @@ este projeto segue [versionamento semântico](https://semver.org/lang/pt-BR/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- `Isox.sign/4` (e `Isox.Xmldsig.Signer.sign/4`, `sign_references/3` e
+  `rsa_sign/2`) aceita a chave privada também em PKCS#8 sem cifra
+  (`PrivateKeyInfo`, o `BEGIN PRIVATE KEY` do OpenSSL 3 e o formato de
+  dentro de um `.pfx`/`.p12`), além de PKCS#1. Quem já passa PKCS#1 segue
+  pelo mesmo caminho, com a mesma assinatura. O README mostra como ler um
+  `.p12` com o pacote [pkcs12](https://hex.pm/packages/pkcs12), que não
+  vira dependência do isox.
+
 ### Corrigido
 
+- Chave privada que não é RSA (EC, por exemplo) ou bytes que não são
+  chave nenhuma levantavam `MatchError`. Agora levantam `ArgumentError`
+  dizendo o que veio e o que se esperava.
 - `Isox.Xmldsig.Signer.issuer_and_serial/1` quebrava com
   `Protocol.UndefinedError` quando o nome do emissor do certificado vinha
   em UTF8String, um dos dois tipos que a RFC 5280 manda usar e o que o

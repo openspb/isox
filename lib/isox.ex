@@ -133,6 +133,11 @@ defmodule Isox do
   Assina `app_hdr_xml` + `document_xml` no perfil de três `<ds:Reference>`
   do Manual de Segurança do SFN. Ambos precisam já vir em forma canônica
   exclusiva. Esta função só encaminha para `Isox.Xmldsig.Signer.sign/4`.
+
+  A chave privada é RSA em DER, em PKCS#1 (`BEGIN RSA PRIVATE KEY`) ou
+  PKCS#8 sem cifra (`BEGIN PRIVATE KEY`, o padrão do OpenSSL 3 e o formato
+  de dentro de um `.pfx`/`.p12`). O certificado também vai em DER. Chave
+  de outro algoritmo levanta `ArgumentError`.
   """
   @spec sign(binary(), binary(), binary(), binary()) :: binary()
   defdelegate sign(app_hdr_xml, document_xml, private_key_der, certificate_der), to: Signer

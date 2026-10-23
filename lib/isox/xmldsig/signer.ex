@@ -51,6 +51,14 @@ defmodule Isox.Xmldsig.Signer do
   pode confiar no que chegou de terceiro). Isto não é checado aqui de
   propósito: checar seria fazer a mesma canonicalização que o caminho de
   template existe para evitar.
+
+  `private_key_der` é a chave privada RSA em DER, em um de dois formatos:
+  PKCS#1 (`RSAPrivateKey`, o PEM `BEGIN RSA PRIVATE KEY`) ou PKCS#8 sem
+  cifra (`PrivateKeyInfo`, o PEM `BEGIN PRIVATE KEY`, que é o que o
+  OpenSSL 3 grava por padrão e o que vem dentro de um `.pfx`/`.p12`).
+  Chave de outro algoritmo, como EC, levanta `ArgumentError`, porque o
+  perfil é RSA-SHA256. `certificate_der` é o certificado X.509 dessa
+  chave, também em DER.
   """
   @spec sign(binary(), binary(), binary(), binary()) :: binary()
   def sign(app_hdr_xml, document_xml, private_key_der, certificate_der) do
@@ -74,6 +82,9 @@ defmodule Isox.Xmldsig.Signer do
   entra pronto (já contém o `Id` que a referência correspondente usa em
   `URI="#..."`) porque quem monta a lista de referências é quem sabe qual
   delas aponta pro `KeyInfo`.
+
+  `private_key_der` aceita os mesmos formatos de `sign/4`: RSA em DER,
+  PKCS#1 ou PKCS#8 sem cifra.
   """
   @spec sign_references([reference_spec()], binary(), binary()) :: binary()
   def sign_references(references, private_key_der, key_info_xml) do
@@ -119,11 +130,54 @@ defmodule Isox.Xmldsig.Signer do
   @spec digest(binary()) :: binary()
   def digest(canonical_xml), do: :sha256 |> :crypto.hash(canonical_xml) |> Base.encode64()
 
+  @doc """
+  Assina `canonical_signed_info` em RSA-SHA256 (PKCS#1 v1.5) e devolve o
+  valor em Base64, como vai em `<ds:SignatureValue>`. `private_key_der`
+  aceita os mesmos formatos de `sign/4`.
+  """
   @spec rsa_sign(binary(), binary()) :: binary()
   def rsa_sign(canonical_signed_info, private_key_der) do
-    private_key = :public_key.der_decode(:RSAPrivateKey, private_key_der)
+    private_key = rsa_private_key(private_key_der)
     canonical_signed_info |> :public_key.sign(:sha256, private_key) |> Base.encode64()
   end
+
+  # PKCS#1 é tentado primeiro por ser o formato que sempre foi aceito: quem
+  # já passa PKCS#1 segue pelo mesmo caminho de antes. ECPrivateKey (SEC1)
+  # entra na lista só para a mensagem de erro dizer que a chave é EC, em
+  # vez de dizer que não foi reconhecida.
+  @private_key_formats [:RSAPrivateKey, :PrivateKeyInfo, :ECPrivateKey]
+
+  defp rsa_private_key(der) do
+    case decode_private_key(der) do
+      {:ok, key} when Record.is_record(key, :RSAPrivateKey) ->
+        key
+
+      {:ok, key} ->
+        raise ArgumentError,
+              "a chave privada é #{key_type(key)}, mas o perfil de assinatura do " <>
+                "Manual de Segurança do SFN é RSA-SHA256 e precisa de chave RSA"
+
+      :error ->
+        raise ArgumentError,
+              "chave privada não reconhecida: esperado o DER de uma chave RSA em " <>
+                "PKCS#1 (RSAPrivateKey) ou PKCS#8 sem cifra (PrivateKeyInfo)"
+    end
+  end
+
+  defp decode_private_key(der) do
+    Enum.find_value(@private_key_formats, :error, &decode_private_key(&1, der))
+  end
+
+  defp decode_private_key(format, der) do
+    {:ok, :public_key.der_decode(format, der)}
+  rescue
+    _ -> nil
+  end
+
+  defp key_type(key) when Record.is_record(key, :ECPrivateKey), do: "EC"
+  defp key_type(key) when Record.is_record(key, :DSAPrivateKey), do: "DSA"
+  defp key_type({rsa, _pss_params}) when Record.is_record(rsa, :RSAPrivateKey), do: "RSASSA-PSS"
+  defp key_type(_key), do: "de um algoritmo que não é RSA"
 
   defp signed_info_xml(references) do
     refs = Enum.map_join(references, "", &reference_xml/1)

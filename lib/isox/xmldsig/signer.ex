@@ -178,9 +178,24 @@ defmodule Isox.Xmldsig.Signer do
   defp oid_short_name(oid),
     do: Map.get(@oid_short_names, oid, oid |> Tuple.to_list() |> Enum.join("."))
 
-  defp attribute_value({_tag, chars}) when is_list(chars), do: to_string(chars)
+  # DirectoryString (RFC 5280 §4.1.2.4) na forma em que `:public_key` o
+  # devolve: UTF8String como binário, já em UTF-8; PrintableString,
+  # TeletexString, BMPString e UniversalString como lista de caracteres.
+  # Nas duas últimas, caractere acima de 255 vem como a quádrupla
+  # {grupo, plano, linha, célula} do ASN.1, não como inteiro. TeletexString
+  # é lido como Latin-1, que é o uso dele na prática.
+  defp attribute_value({:utf8String, utf8}) when is_binary(utf8), do: utf8
+
+  defp attribute_value({_tag, chars}) when is_list(chars),
+    do: chars |> Enum.map(&codepoint/1) |> List.to_string()
+
   defp attribute_value(chars) when is_list(chars), do: to_string(chars)
   defp attribute_value(other), do: to_string(other)
+
+  defp codepoint({group, plane, row, cell}),
+    do: group * 0x1000000 + plane * 0x10000 + row * 0x100 + cell
+
+  defp codepoint(char), do: char
 
   defp escape_text(value) do
     value

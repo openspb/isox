@@ -1,8 +1,26 @@
 defmodule Isox.Xmldsig.SignatureRoundTripTest do
   use ExUnit.Case, async: true
 
+  require Record
+
   alias Isox.Xmldsig.{Signer, Verifier}
   alias Isox.Xmldsig.TestCA
+
+  Record.defrecordp(
+    :otp_certificate,
+    :OTPCertificate,
+    Record.extract(:OTPCertificate, from_lib: "public_key/include/public_key.hrl")
+  )
+
+  Record.defrecordp(
+    :otp_tbs_certificate,
+    :OTPTBSCertificate,
+    Record.extract(:OTPTBSCertificate, from_lib: "public_key/include/public_key.hrl")
+  )
+
+  @country {2, 5, 4, 6}
+  @organization {2, 5, 4, 10}
+  @common_name {2, 5, 4, 3}
 
   setup do
     {:ok, TestCA.generate()}
@@ -142,5 +160,70 @@ defmodule Isox.Xmldsig.SignatureRoundTripTest do
     envelope = assemble_envelope(non_canonical_app_hdr, document_xml(), signature_xml)
 
     assert {:error, {:digest_mismatch, 1}} = Verifier.verify(envelope, certificate_der)
+  end
+
+  describe "emissor do certificado" do
+    test "UTF8String com acento assina e verifica", ca do
+      certificate_der =
+        certificate_with_issuer(ca, [
+          {@country, ~c"BR"},
+          {@organization, {:utf8String, "AC Teste São Paulo"}},
+          {@common_name, {:utf8String, "PSP Teste"}}
+        ])
+
+      assert {"C=BR, O=AC Teste São Paulo, CN=PSP Teste", _serial} =
+               Signer.issuer_and_serial(certificate_der)
+
+      signature_xml =
+        Signer.sign(app_hdr_xml(), document_xml(), ca.private_key_der, certificate_der)
+
+      assert signature_xml =~
+               "<ds:X509IssuerName>C=BR, O=AC Teste São Paulo, CN=PSP Teste</ds:X509IssuerName>"
+
+      envelope = assemble_envelope(app_hdr_xml(), document_xml(), signature_xml)
+
+      assert Verifier.verify(envelope, certificate_der) == :ok
+    end
+
+    # Em BMPString e UniversalString, `:public_key` entrega caractere acima
+    # de 255 como quádrupla {grupo, plano, linha, célula}.
+    for {type, value, rendered} <- [
+          {:printableString, ~c"AC Teste", "AC Teste"},
+          {:teletexString, [?S, 0xE3, ?o], "São"},
+          {:bmpString, [?S, 0xE3, ?o, ?\s, {0, 0, 0x4E, 0x2D}], "São 中"},
+          {:universalString, [?S, 0xE3, ?o, ?\s, {0, 0, 0x4E, 0x2D}, {0, 1, 0xD1, 0x1E}],
+           "São 中𝄞"}
+        ] do
+      test "#{type} assina e verifica", ca do
+        certificate_der =
+          certificate_with_issuer(ca, [
+            {@organization, {unquote(type), unquote(Macro.escape(value))}}
+          ])
+
+        assert {"O=" <> unquote(rendered), _serial} = Signer.issuer_and_serial(certificate_der)
+
+        signature_xml =
+          Signer.sign(app_hdr_xml(), document_xml(), ca.private_key_der, certificate_der)
+
+        envelope = assemble_envelope(app_hdr_xml(), document_xml(), signature_xml)
+
+        assert Verifier.verify(envelope, certificate_der) == :ok
+      end
+    end
+  end
+
+  # O certificado do TestCA com emissor e titular trocados, assinado de
+  # novo pela mesma chave: o jeito mais curto de ter na mão um certificado
+  # com o tipo de DirectoryString que se quer testar.
+  defp certificate_with_issuer(ca, attributes) do
+    name =
+      {:rdnSequence,
+       Enum.map(attributes, fn {oid, value} -> [{:AttributeTypeAndValue, oid, value}] end)}
+
+    ca.certificate_der
+    |> :public_key.pkix_decode_cert(:otp)
+    |> otp_certificate(:tbsCertificate)
+    |> otp_tbs_certificate(issuer: name, subject: name)
+    |> :public_key.pkix_sign(:public_key.der_decode(:RSAPrivateKey, ca.private_key_der))
   end
 end

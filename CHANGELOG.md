@@ -3,6 +3,19 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 este projeto segue [versionamento semântico](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+### Corrigido
+
+- `Isox.Xmldsig.Signer.issuer_and_serial/1` quebrava com
+  `Protocol.UndefinedError` quando o nome do emissor do certificado vinha
+  em UTF8String, um dos dois tipos que a RFC 5280 manda usar e o que o
+  OpenSSL grava por padrão. Como `Isox.sign/4` e `Isox.verify/2` passam por
+  ela, assinar falhava e verificar levantava exceção em vez de devolver
+  `:ok` ou `{:error, motivo}`. BMPString e UniversalString com caractere
+  acima de 255 também quebravam, com `ArgumentError`. Os cinco tipos de
+  DirectoryString agora viram texto, e os que já funcionavam saem iguais.
+
 ## [0.2.0] - 2026-09-14
 
 ### Adicionado
@@ -280,5 +293,6 @@ Primeira versão pública.
   passou a suportar lote, só parou de crashar por causa dele. Achado no
   deep dive de validação do catálogo (issue #47, pacs.002).
 
+[Não lançado]: https://github.com/openspb/isox/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/openspb/isox/releases/tag/v0.2.0
 [0.1.0]: https://github.com/openspb/isox/releases/tag/v0.1.0

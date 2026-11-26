@@ -10,7 +10,8 @@ defmodule Isox.Xml.Codec do
   # string do XML interno, sem interpretar.
   #
   # Validação (pattern/enum/tamanho) acontece no parse; o build confia no
-  # termo que recebe.
+  # termo que recebe. A exceção é o conjunto de caracteres do catálogo
+  # (Isox.Xml.Charset), conferido nos dois sentidos sobre o documento todo.
   #
   # compile_template/3 + render/2 são a terceira API do ADR 0003: compila
   # um termo com lacunas (gap/1) uma vez, e cada renderização só preenche
@@ -23,20 +24,48 @@ defmodule Isox.Xml.Codec do
   import Isox.Xml.Records
 
   alias Isox.Schema.{Attribute, Choice, ComplexType, Element, SimpleType}
+  alias Isox.Xml.Charset
 
-  @doc "Decodifica um XML contra o schema (a raiz, um `Schema.Element`)."
+  @doc """
+  Decodifica um XML contra o schema (a raiz, um `Schema.Element`).
+
+  Antes do parser: tira o BOM UTF-8 e o padding de `#x0000` do fim, e
+  confere o conjunto de caracteres do catálogo (`Isox.Xml.Charset`).
+  Conteúdo que não seja espaço depois do elemento raiz é erro.
+  """
   @spec parse(Element.t(), binary()) :: {:ok, term()} | {:error, String.t()}
   def parse(%Element{} = schema, xml) when is_binary(xml) do
-    # bytes crus, não codepoints já decodificados: o prólogo declara
-    # encoding="UTF-8" e é o próprio xmerl quem decodifica a partir disso.
-    {node, _rest} = :xmerl_scan.string(:binary.bin_to_list(xml))
-    {:ok, extract_type(node, schema.type)}
+    xml = Charset.strip_framing(xml)
+
+    with :ok <- check_received(xml) do
+      # bytes crus, não codepoints já decodificados: o prólogo declara
+      # encoding="UTF-8" e é o próprio xmerl quem decodifica a partir disso.
+      {node, rest} = :xmerl_scan.string(:binary.bin_to_list(xml))
+      ensure_nothing_after_root!(rest)
+      {:ok, extract_type(node, schema.type)}
+    end
   rescue
     e -> {:error, Exception.message(e)}
   catch
     # XML malformado faz o xmerl sair com exit, não raise, e isso não pode
     # derrubar o processo chamador; é entrada não confiável (PSP), não bug.
     :exit, reason -> {:error, inspect(reason)}
+  end
+
+  defp check_received(xml) do
+    case Charset.check(xml) do
+      :ok ->
+        :ok
+
+      {:error, offset, c} ->
+        {:error, "#{Charset.locate(xml, offset)}: #{Charset.describe(c)} (byte #{offset})"}
+    end
+  end
+
+  defp ensure_nothing_after_root!(rest) do
+    unless rest |> List.to_string() |> String.trim() == "" do
+      raise "conteúdo inesperado depois do elemento raiz"
+    end
   end
 
   @doc """
@@ -49,6 +78,15 @@ defmodule Isox.Xml.Codec do
   """
   @spec build(Element.t(), term(), String.t() | nil) :: {:ok, binary()} | {:error, String.t()}
   def build(%Element{} = schema, term, namespace \\ nil) do
+    with {:ok, xml} <- build_unchecked(schema, term, namespace) do
+      case Charset.check(xml) do
+        :ok -> {:ok, xml}
+        {:error, offset, c} -> {:error, charset_error(schema, term, xml, offset, c)}
+      end
+    end
+  end
+
+  defp build_unchecked(schema, term, namespace) do
     body =
       schema
       |> build_element(term)
@@ -57,6 +95,16 @@ defmodule Isox.Xml.Codec do
     {:ok, ~s(<?xml version="1.0" encoding="UTF-8"?>) <> body}
   rescue
     e -> {:error, Exception.message(e)}
+  end
+
+  # Caminho de erro só: a checagem do documento inteiro já falhou, e agora
+  # vale a pena percorrer o termo para dizer qual campo tem o caractere.
+  # Sem achar no termo (o namespace, por exemplo), cai na posição do XML.
+  defp charset_error(schema, term, xml, offset, c, skip? \\ fn _ -> false end) do
+    case Charset.find_in_term(term, skip?) do
+      {path, c} -> "#{schema.tag}/#{path}: #{Charset.describe(c)}"
+      nil -> "#{Charset.locate(xml, offset)}: #{Charset.describe(c)} (byte #{offset})"
+    end
   end
 
   defp inject_xmlns(body, _tag, nil), do: body
@@ -68,6 +116,9 @@ defmodule Isox.Xml.Codec do
   end
 
   # --- template canônico (ADR 0003) ---
+
+  @gap_regex ~r/\x00([a-zA-Z_][a-zA-Z0-9_]*)\x00/
+  @gap_marker ~r/^\x00[a-zA-Z_][a-zA-Z0-9_]*\x00$/
 
   @typedoc "Template compilado: trechos fixos intercalados com lacunas a preencher depois."
   @type template :: [binary() | {:gap, atom()}]
@@ -89,21 +140,44 @@ defmodule Isox.Xml.Codec do
   @spec compile_template(Element.t(), term(), String.t() | nil) ::
           {:ok, template()} | {:error, String.t()}
   def compile_template(%Element{} = schema, term_with_gaps, namespace \\ nil) do
-    with {:ok, xml} <- build(schema, term_with_gaps, namespace) do
-      {:ok, split_gaps(xml)}
+    with {:ok, xml} <- build_unchecked(schema, term_with_gaps, namespace) do
+      fixed = Regex.replace(@gap_regex, xml, "")
+
+      case Charset.check(fixed) do
+        :ok ->
+          {:ok, split_gaps(xml)}
+
+        {:error, offset, c} ->
+          skip? = &Regex.match?(@gap_marker, &1)
+          {:error, charset_error(schema, term_with_gaps, fixed, offset, c, skip?)}
+      end
     end
   end
 
-  @doc "Preenche as lacunas de um template já compilado, produzindo o XML final."
+  @doc """
+  Preenche as lacunas de um template já compilado, produzindo o XML final.
+  Só os valores das lacunas passam pela checagem de caracteres: os trechos
+  fixos já passaram em `compile_template/3`. Valor fora do conjunto do
+  catálogo levanta `ArgumentError`, como lacuna sem valor levanta
+  `KeyError`.
+  """
   @spec render(template(), %{atom() => term()}) :: binary()
   def render(template, variable_fields) do
     Enum.map_join(template, "", fn
-      {:gap, key} -> variable_fields |> Map.fetch!(key) |> to_string() |> escape_text()
-      fixed -> fixed
+      {:gap, key} ->
+        variable_fields |> Map.fetch!(key) |> to_string() |> checked_gap(key) |> escape_text()
+
+      fixed ->
+        fixed
     end)
   end
 
-  @gap_regex ~r/\x00([a-zA-Z_][a-zA-Z0-9_]*)\x00/
+  defp checked_gap(value, key) do
+    case Charset.check(value) do
+      :ok -> value
+      {:error, _offset, c} -> raise ArgumentError, "lacuna #{key}: #{Charset.describe(c)}"
+    end
+  end
 
   defp split_gaps(xml) do
     @gap_regex

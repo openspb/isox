@@ -411,4 +411,58 @@ defmodule Isox.Xml.CodecTest do
       assert {:ok, %{"Variable" => "Tom & Jerry"}} = Codec.parse(@schema, xml)
     end
   end
+
+  describe "codificação do catálogo" do
+    @schema %Element{
+      tag: "E",
+      type: %ComplexType{
+        content: [
+          %Element{tag: "Name", type: %SimpleType{}},
+          %Element{tag: "Tags", type: %SimpleType{}, min: 0, max: :unbounded}
+        ]
+      }
+    }
+
+    test "aceita BOM UTF-8 e padding de #x0000 no fim" do
+      xml = <<0xEF, 0xBB, 0xBF>> <> "<E><Name>São Paulo</Name></E>" <> <<0, 0, 0, 0>>
+      assert {:ok, %{"Name" => "São Paulo"}} = Codec.parse(@schema, xml)
+    end
+
+    test "parse recusa caractere fora do catálogo, dizendo onde" do
+      assert {:error, message} = Codec.parse(@schema, "<E><Name>R€</Name></E>")
+      assert message =~ "E/Name"
+      assert message =~ "U+20AC"
+
+      assert {:error, message} = Codec.parse(@schema, "<E><Name>a" <> <<0xC2, 0x80>> <> "</E>")
+      assert message =~ "U+0080"
+    end
+
+    test "parse recusa conteúdo depois do elemento raiz" do
+      assert {:error, message} = Codec.parse(@schema, "<E><Name>a</Name></E>lixo")
+      assert message =~ "depois do elemento raiz"
+
+      assert {:ok, _} = Codec.parse(@schema, "<E><Name>a</Name></E>\n")
+    end
+
+    test "build recusa caractere fora do catálogo, apontando o campo do termo" do
+      assert {:error, message} = Codec.build(@schema, %{"Name" => "ok", "Tags" => ["a", "😀"]})
+      assert message == "E/Tags[1]: caractere U+1F600 fora do conjunto aceito pelo catálogo"
+
+      assert {:ok, _} = Codec.build(@schema, %{"Name" => "ÁÉÍÓÚ ç ñ ü"})
+    end
+
+    test "compile_template confere os trechos fixos, e render confere as lacunas" do
+      assert {:error, message} =
+               Codec.compile_template(@schema, %{"Name" => "€", "Tags" => [Codec.gap(:tag)]})
+
+      assert message =~ "E/Name"
+
+      assert {:ok, template} = Codec.compile_template(@schema, %{"Name" => Codec.gap(:name)})
+      assert Codec.render(template, %{name: "José"}) =~ "José"
+
+      assert_raise ArgumentError, ~r/lacuna name: caractere U\+20AC/, fn ->
+        Codec.render(template, %{name: "€"})
+      end
+    end
+  end
 end

@@ -3,6 +3,32 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 este projeto segue [versionamento semântico](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+### Modificado
+
+- `encode` e `decode` passam a aplicar o conjunto de caracteres do
+  catálogo (seção "Codificação das Mensagens"): UTF-8 restrito a
+  `#x09 | #x0A | #x0D | [#x20-#x7E] | #x85 | [#xA0-#xFF]`. Antes, o
+  `decode` aceitava tudo o que o XML 1.0 aceita (controles C1, `€`, emoji)
+  e o `encode` não conferia nada, então a lib gerava e aceitava mensagens
+  que o BCB recusa. Agora as duas pontas devolvem `{:error, motivo}`
+  dizendo o campo e o caractere, por exemplo
+  `Envelope/Document/.../Ustrd: caractere U+20AC fora do conjunto aceito
+  pelo catálogo`. A checagem corre uma vez sobre o documento inteiro; a
+  busca pelo campo só acontece quando ela falha.
+- No template compilado (`compile_template/3` e `render/2`), os trechos
+  fixos são conferidos na compilação e os valores das lacunas a cada
+  renderização. Valor inválido numa lacuna levanta `ArgumentError`.
+- `decode` recusa conteúdo depois do elemento raiz, que antes era
+  descartado sem aviso.
+
+### Corrigido
+
+- `decode` tira o BOM UTF-8 do início e o padding de `#x0000` do fim antes
+  do parser, como pede o catálogo. Antes os dois passavam só porque o
+  xmerl tolerava o BOM e o resto depois da raiz era ignorado.
+
 ## [0.3.0] - 2026-10-23
 
 ### Adicionado
